@@ -29,7 +29,7 @@ env_data_to_use <- "ersstv5" ## can be "ersstv4" "ersstv5" "ncep_wind"
 if (env_data_to_use=="ersstv4") {
     ## ersst v4 data
     envdat <- stack(file.path(data_dir, "ftp.cdc.noaa.gov/Datasets/noaa.ersst/sst.mnmean.v4.nc"))
-} else if (env_data_to_use="ersstv5") {
+} else if (env_data_to_use=="ersstv5") {
     ## ersst v5 data
     ersst5_files <- dir(file.path(data_dir, "ftp.ncdc.noaa.gov/pub/data/cmb/ersst/v5/netcdf"), pattern="nc$", full.names=TRUE)
     ersst5_dates <- ymd(paste0(sub("\\.nc$", "", sub(".*ersst\\.v5\\.", "", ersst5_files)), "01")) ## extract dates from file names
@@ -37,7 +37,7 @@ if (env_data_to_use=="ersstv4") {
     idx <- year(ersst5_dates)>=(min(x$year)-2) & year(ersst5_dates)<=(max(x$year)+2)
     ersst5_files <- ersst5_files[idx]
     ersst5_dates <- ersst5_dates[idx]
-    envdat <- brick(as.list(ersst5_files), varname="sst") ## also have "ssta" for anomaly available here
+    envdat <- stack(as.list(ersst5_files), varname="sst") ## also have "ssta" for anomaly available here
     ## set the names of the layers in this brick to be the corresponding dates
     names(envdat) <- paste0("X", ersst5_dates)
 } else if (env_data_to_use=="ncep_wind") {
@@ -53,9 +53,9 @@ envdatx <- as_tibble(values(envdat)) ## extract data from raster object and put 
 envdatx$lon <- coordinates(envdat)[, 1]
 envdatx$lat <- coordinates(envdat)[, 2]
 ## long format
-envdatx <- envdatx %>% gather(key="date", value="value", -lon, -lat)
+envdatx <- envdatx %>% gather(key="date", value="env_value", -lon, -lat)
 ## is equivalent to
-##envdatx <- gather(envdatx, key="date", value="value", -lon, -lat)
+##envdatx <- gather(envdatx, key="date", value="env_value", -lon, -lat)
 
 ## reconvert the date back to an actual date object and extract the year and month
 envdatx <- envdatx %>% mutate(date=ymd(sub("^X", "", date))) %>%
@@ -66,7 +66,7 @@ envdatx_seasonal <- envdatx %>% mutate(season=case_when(month %in% c(12, 1, 2)~"
                                                   month %in% c(3, 4, 5)~"autumn",
                                                   month %in% c(6, 7, 8)~"winter",
                                                   month %in% c(9, 10, 11)~"spring")) %>%
-    group_by(lon, lat, year, season) %>% summarize(value=mean(value)) %>%
+    group_by(lon, lat, year, season) %>% summarize(env_value=mean(env_value)) %>%
     ungroup
 ## adjust the "year" of winter and spring to be the previous year
 ## so that year X of tooth time series matches to the previous year's winter or spring
@@ -87,11 +87,14 @@ rmap <- envdat[[1]] ## use this as a template
 values(rmap) <- NA_real_ ## but chuck away all the values in it
 pmap <- rmap
 ll_grid <- coordinates(rmap)
-temp <- envdatx_seasonal %>% filter(year %in% thisx$year & season==target_season)
+temp <- envdatx_seasonal %>% filter(year %in% thisx$year & season==target_season) ## subset the seasonal data once, outside of the loop
 for (i in seq_len(prod(dim(rmap)))) {
     this_envdat <- temp %>% filter(lon==ll_grid[i, 1] & lat==ll_grid[i, 2]) %>% arrange(year)
     try({
-        this_r <- cor.test(this_envdat$value, thisx$index_value, method="spearman")
+        ## join this_envdat onto our time series
+        corx <- thisx %>% left_join(this_envdat %>% dplyr::select(year, env_value), by="year")
+        ## this will have all rows in x but NA env_values where we don't have environmental data (e.g. NCEP wind prior to 1947 or so)
+        this_r <- cor.test(corx$env_value, corx$index_value, method="spearman", na.action="na.omit")
         rmap[i] <- this_r$estimate
         pmap[i] <- this_r$p.value
         }, silent=TRUE)
@@ -105,4 +108,4 @@ plot(pmap<0.05, col=cmap, main=paste0(this_series, " ", target_season))
 
 ## check one cell
 this_envdat <- temp %>% filter(lon==120 & lat==-50) %>% arrange(year)
-plot(this_envdat$value, thisx$index_value)
+plot(this_envdat$env_value, thisx$index_value)
