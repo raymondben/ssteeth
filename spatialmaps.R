@@ -9,11 +9,11 @@ data_dir <- "/rdsi/PUBLIC/raad/data"
 
 cmap <- c("#7599D5FF", "#6784CFFF", "#5A6FC7FF", "#535EC1FF", "#504FB9FF", "#5146B2FF", "#5A46ABFF", "#6C47A3FF", "#844B9BFF", "#9E5492FF", "#B95E8AFF", "#D26982FF", "#E5747BFF", "#F17F76FF", "#F88B72FF", "#FD996FFF", "#FEA86CFF", "#FFB96BFF", "#FFC769FF", "#FED367FF", "#FEDB66FF")
 
-roi <- c(94, 180, -60, -30) ## region of interest E W S N
+roi <- c(93, 181, -61, -29) ## region of interest E W S N ##*** expanded slightly
 
 mapcoast <- getMap(resolution = "low") ## coastline data for plotting
 ## crop to our region of interest
-mapcoast <- crop(mapcoast, extent(roi))
+mapcoast <- crop(mapcoast, extent(roi)+c(-1, 1, -1, 1)) ##*** add a bit around the edges
 
 ## read chronology data
 x <- read_csv("VHamilton_whale chrons.csv")
@@ -46,7 +46,7 @@ if (env_data_to_use=="ersstv4") {
     names(envdat) <- substr(names(envdat), 1, 11) ## first 11 chars of each will be Xyyyy.mm.dd
 }
 
-envdat <- crop(envdat, extent(roi))
+envdat <- crop(envdat, extent(roi+c(-3, 3, -3, 3))) ##*** crop with extra space around the edges
 
 envdatx <- as_tibble(values(envdat)) ## extract data from raster object and put it into a tibble (data.frame)
 ## add coords
@@ -109,3 +109,31 @@ plot(pmap<0.05, col=cmap, main=paste0(this_series, " ", target_season))
 ## check one cell
 this_envdat <- temp %>% filter(lon==120 & lat==-50) %>% arrange(year)
 plot(this_envdat$env_value, thisx$index_value)
+
+## ggplot maps
+library(ggplot2)
+ggcoast <- fortify(mapcoast)
+
+ggx <- as.data.frame(cbind(coordinates(rmap), values(rmap)))
+names(ggx) <- c("long", "lat", "r")
+
+## find the largest (absolute) value so that we have positive and negative colour limits matching
+colour_max <- max(abs(ggx$r), na.rm=TRUE)
+
+## helper functions to make labels look nicer
+num2lon <- function(z) paste0(z, " \u00B0E")
+num2lat <- function(z) paste0(abs(z), " \u00B0S")
+
+ggplot(ggx, aes(long, lat)) +
+    geom_tile(aes(fill=r)) +
+    ## use a red-blue anomaly map so that positive values are red and negative ones blue
+    scale_fill_distiller(palette="RdBu", na.value="white", name="Correlation", limits=c(-1, 1)*colour_max) +
+    ## add coast
+    geom_polygon(data=ggcoast, aes(group=group), color="black", fill="grey50") +
+    coord_fixed() + ## fixed aspect ratio. Probably better to use coord_map() here but it is appallingly slow
+    ## get rid of decorations we don't want, make font bigger
+    theme_bw() + theme(axis.line = element_blank(), text = element_text(size=18)) +
+    ## set axis limits and format the labels
+    scale_x_continuous(limits=roi[1:2], expand=c(0,0), labels=num2lon) +
+    scale_y_continuous(limits=roi[3:4], expand=c(0,0), labels=num2lat) +
+    labs(x="", y="")
