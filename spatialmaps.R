@@ -112,6 +112,23 @@ plot(this_envdat$env_value, thisx$index_value)
 
 ## ggplot maps
 library(ggplot2)
+
+trim_tiles_to_extent <- function(data, x, y, width, height, extent) {
+    ## assumes all tiles are equally sized
+    ## extent should be c(xmin, xmax, ymin, ymax)
+    xmin <- pmax(data[[x]]-width/2, extent[1])
+    xmax <- pmin(data[[x]]+width/2, extent[2])
+    idx <- xmin==xmax
+    xmin[idx] <- NA
+    xmax[idx] <- NA
+    ymin <- pmax(data[[y]]-height/2, extent[3])
+    ymax <- pmin(data[[y]]+height/2, extent[4])
+    idx <- ymin==ymax
+    ymin[idx] <- NA
+    ymax[idx] <- NA
+    data %>% mutate(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)
+}
+
 ggcoast <- fortify(mapcoast)
 
 ggx <- as.data.frame(cbind(coordinates(rmap), values(rmap)))
@@ -124,8 +141,10 @@ colour_max <- max(abs(ggx$r), na.rm=TRUE)
 num2lon <- function(z) paste0(z, " \u00B0E")
 num2lat <- function(z) paste0(abs(z), " \u00B0S")
 
+ggx <- trim_tiles_to_extent(ggx, x="long", y="lat", width=res(rmap)[1], height=res(rmap)[2], extent=roi)
+
 ggplot(ggx, aes(long, lat)) +
-    geom_tile(aes(fill=r)) +
+    geom_rect(aes(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, fill=r)) +
     ## use a red-blue anomaly map so that positive values are red and negative ones blue
     scale_fill_distiller(palette="RdBu", na.value="white", name="Correlation", limits=c(-1, 1)*colour_max) +
     ## add coast
